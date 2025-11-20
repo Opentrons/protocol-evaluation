@@ -60,6 +60,8 @@ The project uses GitHub Actions for continuous integration:
 
 All checks run automatically on pull requests and pushes to `main`.
 
+> **TODO – RTP overrides:** Runtime parameter (RTP) override scenarios are not yet implemented or tested end-to-end. Once someone needs RTP overrides, we can extend the processor/API/tests to cover the behavior.
+
 ### Running the Services
 
 Start the FastAPI server:
@@ -100,6 +102,8 @@ Run all tests:
 ```bash
 make test
 ```
+
+> **Note:** `make test-e2e` automatically starts both the API and processor services for you, so you don't need to run them manually before exercising full workflow tests.
 
 Run only unit tests:
 
