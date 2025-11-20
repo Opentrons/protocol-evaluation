@@ -89,7 +89,8 @@ async def analyze_protocol(
         default=[], description="Optional custom labware JSON files"
     ),
     csv_file: UploadFile | None = File(
-        default=None, description="Optional CSV file (.csv or .txt)"
+        default=None,
+        description="Optional CSV file (.csv or .txt) used for add_csv_file runtime parameters",
     ),
     rtp: str | None = Form(default=None, description="Optional RTP JSON object"),
 ) -> AnalyzeResponse:
@@ -136,8 +137,8 @@ async def analyze_protocol(
             )
         labware_filenames.append(labware_file.filename)
 
-    # Validate CSV file extension if provided
-    csv_filename = None
+    # Validate CSV file extensions if provided
+    csv_filename: str | None = None
     if csv_file and csv_file.filename:
         if not (
             csv_file.filename.endswith(".csv") or csv_file.filename.endswith(".txt")
@@ -163,8 +164,14 @@ async def analyze_protocol(
     job_id = file_storage.create_job_directory()
     job_dir = file_storage.base_dir / job_id
 
+    metadata_extra: dict[str, Any] = {}
+    if rtp_data is not None:
+        metadata_extra["rtp"] = rtp_data
+    if csv_filename:
+        metadata_extra["csv_file"] = csv_filename
+
     # Save job metadata with robot server version
-    write_job_metadata(job_dir, robot_version)
+    write_job_metadata(job_dir, robot_version, **metadata_extra)
 
     # Save files synchronously (file I/O is fast enough)
     await file_storage.save_protocol_file(job_id, protocol_file)

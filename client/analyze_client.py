@@ -1,6 +1,9 @@
 """Client for uploading protocols and retrieving analysis results."""
 
+import asyncio
+import json
 import time
+from contextlib import ExitStack
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +28,9 @@ class AnalysisClient:
         self,
         protocol_file: Path,
         robot_version: str = "8.7.0",
+        labware_files: list[Path] | None = None,
+        csv_file: Path | None = None,
+        rtp: dict[str, Any] | None = None,
     ) -> str:
         """
         Submit a protocol for analysis.
@@ -32,13 +38,55 @@ class AnalysisClient:
         Args:
             protocol_file: Path to the protocol file
             robot_version: Robot server version (e.g., '8.7.0', 'next')
+            labware_files: Optional list of custom labware definition files
+            csv_file: Optional CSV/text file containing runtime data
+            rtp: Optional runtime parameter object to send as JSON
 
         Returns:
             Job ID for tracking the analysis
         """
-        with open(protocol_file, "rb") as f:
-            files = {"protocol_file": (protocol_file.name, f, "text/x-python")}
+        with ExitStack() as stack:
+            protocol_handle = stack.enter_context(open(protocol_file, "rb"))
+            files: list[tuple[str, tuple[str, Any, str]]] = [
+                (
+                    "protocol_file",
+                    (protocol_file.name, protocol_handle, "text/x-python"),
+                )
+            ]
+
+            if labware_files:
+                for labware_file in labware_files:
+                    labware_handle = stack.enter_context(open(labware_file, "rb"))
+                    files.append(
+                        (
+                            "labware_files",
+                            (
+                                labware_file.name,
+                                labware_handle,
+                                "application/json",
+                            ),
+                        )
+                    )
+
+            if csv_file:
+                csv_handle = stack.enter_context(open(csv_file, "rb"))
+                content_type = (
+                    "text/csv" if csv_file.suffix.lower() == ".csv" else "text/plain"
+                )
+                files.append(
+                    (
+                        "csv_file",
+                        (
+                            csv_file.name,
+                            csv_handle,
+                            content_type,
+                        ),
+                    )
+                )
+
             data = {"robot_version": robot_version}
+            if rtp is not None:
+                data["rtp"] = json.dumps(rtp)
 
             response = self.client.post(
                 f"{self.base_url}/analyze",
@@ -104,3 +152,124 @@ class AnalysisClient:
     def __exit__(self, exc_type, exc_val, exc_tb):
         """Context manager exit."""
         self.close()
+
+
+class AsyncAnalysisClient:
+    """Async client for interacting with the protocol analysis API."""
+
+    def __init__(self, base_url: str = "http://127.0.0.1:8000"):
+        """Initialize the async client with the base API URL."""
+        self.base_url = base_url
+        self.client = httpx.AsyncClient(timeout=30.0)
+
+    async def get_info(self) -> dict[str, Any]:
+        """Get API information."""
+        response = await self.client.get(f"{self.base_url}/info")
+        response.raise_for_status()
+        return response.json()
+
+    async def submit_protocol(
+        self,
+        protocol_file: Path,
+        robot_version: str = "8.7.0",
+        labware_files: list[Path] | None = None,
+        csv_file: Path | None = None,
+        rtp: dict[str, Any] | None = None,
+    ) -> str:
+        """Submit a protocol for analysis."""
+
+        with ExitStack() as stack:
+            protocol_handle = stack.enter_context(open(protocol_file, "rb"))
+            files: list[tuple[str, tuple[str, Any, str]]] = [
+                (
+                    "protocol_file",
+                    (protocol_file.name, protocol_handle, "text/x-python"),
+                )
+            ]
+
+            if labware_files:
+                for labware_file in labware_files:
+                    labware_handle = stack.enter_context(open(labware_file, "rb"))
+                    files.append(
+                        (
+                            "labware_files",
+                            (
+                                labware_file.name,
+                                labware_handle,
+                                "application/json",
+                            ),
+                        )
+                    )
+
+            if csv_file:
+                csv_handle = stack.enter_context(open(csv_file, "rb"))
+                content_type = (
+                    "text/csv" if csv_file.suffix.lower() == ".csv" else "text/plain"
+                )
+                files.append(
+                    (
+                        "csv_file",
+                        (
+                            csv_file.name,
+                            csv_handle,
+                            content_type,
+                        ),
+                    )
+                )
+
+            data = {"robot_version": robot_version}
+            if rtp is not None:
+                data["rtp"] = json.dumps(rtp)
+
+            response = await self.client.post(
+                f"{self.base_url}/analyze",
+                files=files,
+                data=data,
+            )
+            response.raise_for_status()
+            result = response.json()
+            return result["job_id"]
+
+    async def get_job_status(self, job_id: str) -> dict[str, Any]:
+        """Get the status of a job."""
+        response = await self.client.get(f"{self.base_url}/jobs/{job_id}/status")
+        response.raise_for_status()
+        return response.json()
+
+    async def get_job_result(self, job_id: str) -> dict[str, Any]:
+        """Get the result of a completed job."""
+        response = await self.client.get(f"{self.base_url}/jobs/{job_id}/result")
+        response.raise_for_status()
+        return response.json()
+
+    async def wait_for_completion(
+        self, job_id: str, poll_interval: float = 1.0, max_wait: float = 300.0
+    ) -> dict[str, Any]:
+        """Poll job status until completion or timeout."""
+
+        start_time = time.time()
+        while True:
+            status = await self.get_job_status(job_id)
+
+            if status["status"] in ["completed", "failed"]:
+                return status
+
+            elapsed = time.time() - start_time
+            if elapsed > max_wait:
+                raise TimeoutError(
+                    f"Job {job_id} did not complete within {max_wait} seconds"
+                )
+
+            await asyncio.sleep(poll_interval)
+
+    async def close(self):
+        """Close the HTTP client."""
+        await self.client.aclose()
+
+    async def __aenter__(self):
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """Async context manager exit."""
+        await self.close()

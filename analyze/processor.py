@@ -8,6 +8,7 @@ import json
 import re
 import subprocess
 import time
+import ast
 from pathlib import Path
 from typing import Any
 
@@ -65,14 +66,11 @@ class ProtocolProcessor:
         if labware_dir.exists():
             files["labware_files"] = [str(f) for f in labware_dir.glob("*.json")]
 
-        # Find CSV file
-        for csv_file in job_dir.glob("*.csv"):
-            files["csv_file"] = str(csv_file)
-            break
-
-        if not files["csv_file"]:
-            for txt_file in job_dir.glob("*.txt"):
-                files["csv_file"] = str(txt_file)
+        # Find CSV/TXT file (treated as CSV input)
+        for pattern in ("*.csv", "*.txt"):
+            csv_match = next(job_dir.glob(pattern), None)
+            if csv_match:
+                files["csv_file"] = str(csv_match)
                 break
 
         return files
@@ -122,7 +120,9 @@ class ProtocolProcessor:
             files = self.get_job_files(job_id)
 
             # Run the actual analysis using the protocol in the correct venv
-            analysis_result = self._run_analysis(python_path, files, robot_version)
+            analysis_result = self._run_analysis(
+                python_path, files, robot_version, metadata
+            )
 
             # Write completed analysis
             completed_file = job_dir / "completed_analysis.json"
@@ -154,7 +154,11 @@ class ProtocolProcessor:
             return None
 
     def _run_analysis(
-        self, python_path: Path, files: dict[str, Any], robot_version: str
+        self,
+        python_path: Path,
+        files: dict[str, Any],
+        robot_version: str,
+        metadata: dict[str, Any] | None,
     ) -> dict[str, Any]:
         """Run protocol analysis in the specified virtual environment.
 
@@ -175,6 +179,11 @@ class ProtocolProcessor:
                 "robot_version": robot_version,
             }
 
+        # Build runtime parameter mappings (CSV files + explicit RTP values)
+        rtp_values_json, rtp_files_json = self._build_runtime_parameters(
+            metadata, files
+        )
+
         # Build the analysis command using opentrons.cli.analyze
         cmd = [
             str(python_path),
@@ -189,12 +198,14 @@ from opentrons.cli.analyze import _analyze, _Output
 
 protocol_file = Path(sys.argv[1])
 labware_files = [Path(p) for p in sys.argv[2].split(',') if p]
+rtp_values = sys.argv[3]
+rtp_files = sys.argv[4]
 files = labware_files + [protocol_file]
 json_output_stream = io.BytesIO()
 outputs = [_Output(to_file=json_output_stream, kind='json')]
 
 try:
-    exit_code = asyncio.run(_analyze(files, '{}', '{}', outputs, False, False, False))
+    exit_code = asyncio.run(_analyze(files, rtp_values, rtp_files, outputs, False, False, False))
 except Exception as e:
     print(json.dumps({'error': f'Exception: {str(e)}'}), file=sys.stdout)
     sys.exit(1)
@@ -212,6 +223,8 @@ sys.exit(exit_code)
 """,
             protocol_file,
             ",".join(files.get("labware_files", [])),
+            rtp_values_json,
+            rtp_files_json,
         ]
 
         try:
@@ -260,6 +273,9 @@ sys.exit(exit_code)
                     "processed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                     "python_path": str(python_path),
                     "exit_code": proc.returncode,
+                    "csv_parameter_map": json.loads(rtp_files_json)
+                    if rtp_files_json
+                    else {},
                 },
             }
 
@@ -271,6 +287,9 @@ sys.exit(exit_code)
                 "robot_version": robot_version,
                 "files_analyzed": {
                     "protocol_file": Path(protocol_file).name,
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
                 },
             }
         except Exception as e:
@@ -281,6 +300,9 @@ sys.exit(exit_code)
                 "robot_version": robot_version,
                 "files_analyzed": {
                     "protocol_file": Path(protocol_file).name,
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
                 },
             }
 
@@ -314,6 +336,85 @@ sys.exit(exit_code)
                 pending_jobs.append(job_id)
 
         return pending_jobs
+
+    def _build_runtime_parameters(
+        self, metadata: dict[str, Any] | None, files: dict[str, Any]
+    ) -> tuple[str, str]:
+        """Construct runtime parameter JSON strings for opentrons CLI."""
+
+        rtp_values: dict[str, Any] = {}
+        if metadata:
+            stored_rtp = metadata.get("rtp")
+            if isinstance(stored_rtp, dict):
+                rtp_values = stored_rtp
+
+        csv_map = self._map_csv_parameter(files)
+
+        return json.dumps(rtp_values or {}), json.dumps(csv_map or {})
+
+    def _map_csv_parameter(self, files: dict[str, Any]) -> dict[str, str]:
+        """Map the single CSV parameter name to the uploaded file path."""
+
+        protocol_path = files.get("protocol_file")
+        csv_path = files.get("csv_file")
+
+        if not protocol_path or not csv_path:
+            return {}
+
+        param_names = self._extract_csv_parameter_names(Path(protocol_path))
+
+        if not param_names:
+            return {}
+
+        if len(param_names) > 1:
+            raise ValueError("Only one CSV File parameter can be defined per protocol.")
+
+        return {param_names[0]: csv_path}
+
+    def _extract_csv_parameter_names(self, protocol_path: Path) -> list[str]:
+        """Parse protocol file to find add_csv_file variable names."""
+
+        try:
+            source = protocol_path.read_text()
+            tree = ast.parse(source)
+        except Exception:
+            return []
+
+        parameter_names: list[str] = []
+
+        class _CsvParamVisitor(ast.NodeVisitor):
+            def __init__(self):
+                self.names: list[str] = []
+                self._inside_target = False
+
+            def visit_FunctionDef(self, node: ast.FunctionDef):
+                if node.name == "add_parameters":
+                    prev = self._inside_target
+                    self._inside_target = True
+                    self.generic_visit(node)
+                    self._inside_target = prev
+                else:
+                    self.generic_visit(node)
+
+            def visit_Call(self, node: ast.Call):
+                if (
+                    self._inside_target
+                    and isinstance(node.func, ast.Attribute)
+                    and node.func.attr == "add_csv_file"
+                ):
+                    for kw in node.keywords:
+                        if (
+                            kw.arg == "variable_name"
+                            and isinstance(kw.value, ast.Constant)
+                            and isinstance(kw.value.value, str)
+                        ):
+                            self.names.append(kw.value.value)
+                self.generic_visit(node)
+
+        visitor = _CsvParamVisitor()
+        visitor.visit(tree)
+        parameter_names.extend(visitor.names)
+        return parameter_names
 
     def run_once(self) -> int:
         """Process all pending jobs once.
