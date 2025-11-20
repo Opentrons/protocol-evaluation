@@ -3,6 +3,15 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# Storage directory for analysis jobs
+storage/
+
+# Virtual environments for different Opentrons versions
+.venvs/
+
+# Log files
+*.log
+
 # C extensions
 *.so
 
@@ -205,3 +214,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+example_protocol.py
+.DS_Store
+*.pid
+*.log
+*.zip
