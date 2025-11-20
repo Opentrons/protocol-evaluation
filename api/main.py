@@ -1,0 +1,275 @@
+"""FastAPI application for protocol analysis."""
+
+from typing import Any
+
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from pydantic import BaseModel
+
+from analyze.job_status import (
+    JobStatus,
+    read_job_status,
+    write_job_metadata,
+    write_job_status,
+)
+from api.file_storage import file_storage
+from api.version_mapping import PROTOCOL_API_TO_ROBOT_STACK, VALID_ROBOT_VERSIONS
+
+# Get version from package metadata
+VERSION = "0.1.0"
+
+app = FastAPI(
+    title="Protocol Analysis API",
+    description="API for analyzing Opentrons protocols",
+    version=VERSION,
+)
+
+
+class InfoResponse(BaseModel):
+    """Response model for the /info endpoint."""
+
+    version: str
+    protocol_api_versions: dict[str, str]
+    supported_robot_versions: list[str]
+
+
+@app.get("/info", response_model=InfoResponse)
+async def get_info() -> InfoResponse:
+    """
+    Get application information.
+
+    Returns:
+        InfoResponse containing:
+        - version: The current application version
+        - protocol_api_versions: Mapping of protocol API versions to robot stack versions
+        - supported_robot_versions: List of supported robot server versions
+    """
+    return InfoResponse(
+        version=VERSION,
+        protocol_api_versions=PROTOCOL_API_TO_ROBOT_STACK,
+        supported_robot_versions=sorted(VALID_ROBOT_VERSIONS),
+    )
+
+
+class AnalyzeResponse(BaseModel):
+    """Response model for the /analyze endpoint."""
+
+    job_id: str
+    protocol_file: str
+    labware_files: list[str]
+    csv_file: str | None
+    rtp: dict[str, Any] | None
+    robot_version: str
+
+
+class JobStatusResponse(BaseModel):
+    """Response model for job status endpoint."""
+
+    job_id: str
+    status: str
+    updated_at: str | None = None
+    error: str | None = None
+
+
+class JobResultResponse(BaseModel):
+    """Response model for completed job analysis."""
+
+    job_id: str
+    status: str
+    analysis: dict[str, Any] | None = None
+    error: str | None = None
+
+
+@app.post("/analyze", response_model=AnalyzeResponse)
+async def analyze_protocol(
+    robot_version: str = Form(
+        ..., description="Robot server version (e.g., '8.7.0', '8.8.0')"
+    ),
+    protocol_file: UploadFile = File(..., description="Python protocol file (.py)"),
+    labware_files: list[UploadFile] = File(
+        default=[], description="Optional custom labware JSON files"
+    ),
+    csv_file: UploadFile | None = File(
+        default=None, description="Optional CSV file (.csv or .txt)"
+    ),
+    rtp: str | None = Form(default=None, description="Optional RTP JSON object"),
+) -> AnalyzeResponse:
+    """
+    Analyze a protocol file with optional custom labware, CSV data, and runtime parameters.
+
+    Args:
+        robot_version: Robot server version (e.g., '8.7.0', '8.8.0')
+        protocol_file: Required Python protocol file (.py extension)
+        labware_files: Optional list of custom labware definition files (.json)
+        csv_file: Optional CSV file (.csv or .txt extension)
+        rtp: Optional runtime parameters as JSON string
+
+    Returns:
+        AnalyzeResponse with details about the uploaded files
+
+    Raises:
+        HTTPException: If file extensions are invalid or version is unsupported
+    """
+    import json
+
+    # Validate robot server version
+    if robot_version not in VALID_ROBOT_VERSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Unsupported robot server version: {robot_version}. "
+            f"Supported versions: {', '.join(sorted(VALID_ROBOT_VERSIONS))}",
+        )
+
+    # Validate protocol file extension
+    if not protocol_file.filename or not protocol_file.filename.endswith(".py"):
+        raise HTTPException(
+            status_code=400,
+            detail="Protocol file must have a .py extension",
+        )
+
+    # Validate labware files extensions
+    labware_filenames = []
+    for labware_file in labware_files:
+        if not labware_file.filename or not labware_file.filename.endswith(".json"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Labware file '{labware_file.filename}' must have a .json extension",
+            )
+        labware_filenames.append(labware_file.filename)
+
+    # Validate CSV file extension if provided
+    csv_filename = None
+    if csv_file and csv_file.filename:
+        if not (
+            csv_file.filename.endswith(".csv") or csv_file.filename.endswith(".txt")
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="CSV file must have a .csv or .txt extension",
+            )
+        csv_filename = csv_file.filename
+
+    # Parse RTP JSON if provided
+    rtp_data = None
+    if rtp:
+        try:
+            rtp_data = json.loads(rtp)
+        except json.JSONDecodeError as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid RTP JSON: {str(e)}",
+            )
+
+    # Create job directory and save files synchronously
+    job_id = file_storage.create_job_directory()
+    job_dir = file_storage.base_dir / job_id
+
+    # Save job metadata with robot server version
+    write_job_metadata(job_dir, robot_version)
+
+    # Save files synchronously (file I/O is fast enough)
+    await file_storage.save_protocol_file(job_id, protocol_file)
+
+    if labware_files:
+        await file_storage.save_labware_files(job_id, labware_files)
+
+    if csv_file:
+        await file_storage.save_csv_file(job_id, csv_file)
+
+    # Mark job as pending for the processor to pick up
+    write_job_status(job_dir, JobStatus.PENDING)
+
+    return AnalyzeResponse(
+        job_id=job_id,
+        protocol_file=protocol_file.filename,
+        labware_files=labware_filenames,
+        csv_file=csv_filename,
+        rtp=rtp_data,
+        robot_version=robot_version,
+    )
+
+
+@app.get(
+    "/jobs/{job_id}/status",
+    response_model=JobStatusResponse,
+    summary="Get job status",
+    description="Check the status of an analysis job",
+)
+async def get_job_status(job_id: str) -> JobStatusResponse:
+    """
+    Get the current status of an analysis job.
+
+    Args:
+        job_id: The job ID to check
+
+    Returns:
+        JobStatusResponse with current status and timestamp
+
+    Raises:
+        HTTPException: If job is not found
+    """
+    job_dir = file_storage.base_dir / job_id
+
+    if not file_storage.job_exists(job_id):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    status_data = read_job_status(job_dir)
+
+    return JobStatusResponse(
+        job_id=job_id,
+        status=status_data.get("status", "pending"),
+        updated_at=status_data.get("updated_at"),
+        error=status_data.get("error"),
+    )
+
+
+@app.get(
+    "/jobs/{job_id}/result",
+    response_model=JobResultResponse,
+    summary="Get job result",
+    description="Get the analysis result for a completed job",
+)
+async def get_job_result(job_id: str) -> JobResultResponse:
+    """
+    Get the analysis result for a completed job.
+
+    Args:
+        job_id: The job ID to retrieve
+
+    Returns:
+        JobResultResponse with analysis data if completed
+
+    Raises:
+        HTTPException: If job is not found or not yet completed
+    """
+    import json
+
+    job_dir = file_storage.base_dir / job_id
+
+    if not file_storage.job_exists(job_id):
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    status_data = read_job_status(job_dir)
+    status = status_data.get("status", "pending")
+
+    # Check if job has completed
+    completed_file = job_dir / "completed_analysis.json"
+    if not completed_file.exists():
+        if status == JobStatus.FAILED.value:
+            return JobResultResponse(
+                job_id=job_id,
+                status=status,
+                error=status_data.get("error", "Job failed"),
+            )
+        raise HTTPException(
+            status_code=400,
+            detail=f"Job {job_id} has not completed yet. Current status: {status}",
+        )
+
+    # Read completed analysis
+    analysis_data = json.loads(completed_file.read_text())
+
+    return JobResultResponse(
+        job_id=job_id,
+        status=status,
+        analysis=analysis_data,
+    )

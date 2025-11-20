@@ -1,0 +1,42 @@
+name: Lint and Test
+
+on:
+    pull_request:
+        branches: [main]
+
+jobs:
+    lint:
+        name: Lint
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: ./.github/actions/setup
+            - name: Run linter
+              run: make lint
+
+    test:
+        name: Test (Unit & Integration)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: ./.github/actions/setup
+            - name: Run tests
+              run: make test
+
+    test-e2e:
+        name: Test (End-to-End)
+        runs-on: ubuntu-latest
+        steps:
+            - uses: actions/checkout@v5
+            - uses: ./.github/actions/setup
+            - name: Run e2e tests
+              run: make test-e2e
+            - name: Upload logs on failure
+              if: failure()
+              uses: actions/upload-artifact@v4
+              with:
+                  name: e2e-logs
+                  path: |
+                      e2e-api.log
+                      e2e-processor.log
+                  retention-days: 7

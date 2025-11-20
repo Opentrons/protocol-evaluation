@@ -1,0 +1,82 @@
+.PHONY: setup
+setup:
+	uv sync --dev --frozen
+
+.PHONY: teardown
+teardown:
+	uv venv --rm
+
+.PHONY: test-unit
+test-unit:
+	uv run pytest tests/unit/ -v
+
+.PHONY: test-integration
+test-integration:
+	uv run pytest tests/integration/ -v
+
+.PHONY: test
+test:
+	uv run pytest -v --ignore=tests/e2e
+
+.PHONY: test-all
+test-all: lint test test-e2e
+
+.PHONY: format
+format:
+	uv run ruff check --fix . --exclude test-files
+	uv run ruff format . --exclude test-files
+
+.PHONY: lint
+lint:
+	uv run ruff check . --exclude test-files
+	uv run ruff format --check . --exclude test-files
+
+.PHONY: clean-storage
+clean-storage:
+	rm -rf storage/jobs/*
+
+.PHONY: clean-venvs
+clean-venvs:
+	rm -rf .venvs
+
+.PHONY: run-api
+run-api:
+	uv run fastapi dev api/main.py
+
+.PHONY: run-processor
+run-processor:
+	uv run python run_processor.py
+
+.PHONY: run-processor-once
+run-processor-once:
+	uv run python run_processor.py --mode once
+
+.PHONY: run
+run:
+	@echo "Starting API server and processor..."
+	@echo "API will be available at http://127.0.0.1:8000"
+	@echo "Press Ctrl+C to stop both services"
+	@(trap 'kill 0' SIGINT; \
+		uv run fastapi dev api/main.py & \
+		sleep 2 && \
+		uv run python run_processor.py & \
+		wait)
+
+.PHONY: run-client
+run-client:
+	uv run python run_client.py
+
+.PHONY: test-e2e
+test-e2e:
+	@echo "Starting services for e2e tests..."
+	@make clean-storage > /dev/null 2>&1
+	@(uv run fastapi dev api/main.py > e2e-api.log 2>&1 &) && \
+	(uv run python run_processor.py > e2e-processor.log 2>&1 &) && \
+	sleep 3 && \
+	echo "Running e2e tests..." && \
+	uv run pytest tests/e2e/ -v; \
+	TEST_EXIT=$$?; \
+	echo "Stopping services..."; \
+	pkill -f "fastapi dev api/main.py" || true; \
+	pkill -f "run_processor.py" || true; \
+	exit $$TEST_EXIT
