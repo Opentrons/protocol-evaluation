@@ -11,10 +11,10 @@ This is a **two-component asynchronous protocol analysis service** for Opentrons
 
 ### Multi-Version Analysis System
 
-**Key Concept**: This service analyzes protocols against **multiple Opentrons robot server versions** (8.0.0-8.8.0) by creating isolated Python virtual environments for each version.
+**Key Concept**: This service analyzes protocols against **multiple Opentrons robot server versions** (8.0.0 through `next`) by creating isolated Python virtual environments for each version.
 
-- `analyze/env_config.py` - Maps robot versions to pip install specs (including git-based installs for unreleased versions)
-- `analyze/venv_manager.py` - Creates/manages venvs in `.venvs/opentrons-{version}/`
+- `analyze/env_config.py` - Maps robot versions to pip install specs (including a `next` alias that follows the latest published alpha build)
+- `analyze/venv_manager.py` - Creates/manages venvs in `.venvs/opentrons-{version}/` using the uv-managed Python interpreter to keep versions consistent
 - `api/version_mapping.py` - Maps Protocol API versions (2.20-2.27) to robot stack versions
 
 **Pattern**: Each analysis job specifies a `robot_version`, which determines which venv to use. The processor creates venvs on-demand and runs `opentrons.cli.analyze` within the correct environment.
@@ -32,6 +32,7 @@ make lint               # Check code with ruff (no fixes)
 make format             # Auto-format with ruff
 make clean-storage      # Delete all job files
 make clean-venvs        # Delete all opentrons venvs
+make clean-e2e-artifacts # Remove PID/log files written by make test-e2e
 ```
 
 ### Running Services Locally
@@ -123,7 +124,7 @@ with AnalysisClient() as client:
 
 ## Important Quirks & Gotchas
 
-1. **Version 8.8.0 installs from Git**: Uses `git+https://github.com/Opentrons/opentrons.git@chore_release-8.8.0#subdirectory=api` (unreleased version). Requires Git installed.
+1. **`next` alpha installs from PyPI**: Uses the latest published `opentrons` alpha (currently 8.8.0a8). First-time installs can still take ~1 minute while pip resolves dependencies, so prefer reusing venvs when possible.
 
 2. **Test file exclusions**: `ruff` config excludes `test-files/` directory (contains actual protocol files that may not follow linting rules).
 

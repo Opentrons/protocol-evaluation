@@ -31,7 +31,7 @@ class AnalysisClient:
 
         Args:
             protocol_file: Path to the protocol file
-            robot_version: Robot server version (e.g., '8.7.0', '8.8.0')
+            robot_version: Robot server version (e.g., '8.7.0', 'next')
 
         Returns:
             Job ID for tracking the analysis

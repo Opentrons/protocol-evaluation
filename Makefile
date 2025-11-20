@@ -39,6 +39,13 @@ clean-storage:
 clean-venvs:
 	rm -rf .venvs
 
+.PHONY: clean-e2e-artifacts
+clean-e2e-artifacts:
+	rm -f e2e-api.log e2e-processor.log e2e-api.pid e2e-processor.pid
+
+.PHONY: clean
+clean: clean-storage clean-venvs clean-e2e-artifacts
+
 .PHONY: run-api
 run-api:
 	uv run fastapi dev api/main.py
@@ -70,13 +77,13 @@ run-client:
 test-e2e:
 	@echo "Starting services for e2e tests..."
 	@make clean-storage > /dev/null 2>&1
-	@(uv run fastapi dev api/main.py > e2e-api.log 2>&1 &) && \
-	(uv run python run_processor.py > e2e-processor.log 2>&1 &) && \
+	@PYTHONUNBUFFERED=1 uv run fastapi dev api/main.py > e2e-api.log 2>&1 & echo $$! > e2e-api.pid; \
+	PYTHONUNBUFFERED=1 uv run python run_processor.py > e2e-processor.log 2>&1 & echo $$! > e2e-processor.pid; \
 	sleep 3 && \
 	echo "Running e2e tests..." && \
 	uv run pytest tests/e2e/ -v; \
 	TEST_EXIT=$$?; \
 	echo "Stopping services..."; \
-	pkill -f "fastapi dev api/main.py" || true; \
-	pkill -f "run_processor.py" || true; \
+	kill $$(cat e2e-api.pid 2>/dev/null) 2>/dev/null || true; \
+	kill $$(cat e2e-processor.pid 2>/dev/null) 2>/dev/null || true; \
 	exit $$TEST_EXIT

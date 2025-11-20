@@ -33,9 +33,9 @@ def main():
         job_id_870 = client.submit_protocol(protocol_file, robot_version="8.7.0")
         print(f"    Job ID: {job_id_870}")
 
-        print("  - Submitting for robot server version 8.8.0 (next release)")
-        job_id_880 = client.submit_protocol(protocol_file, robot_version="8.8.0")
-        print(f"    Job ID: {job_id_880}")
+        print("  - Submitting for robot server version 'next' (latest alpha)")
+        job_id_next = client.submit_protocol(protocol_file, robot_version="next")
+        print(f"    Job ID: {job_id_next}")
         print()
 
         # Poll for completion of both jobs
@@ -44,15 +44,15 @@ def main():
         status_870 = client.wait_for_completion(job_id_870, poll_interval=0.5)
         print(f"    Status: {status_870['status']}")
 
-        print("  - Waiting for 8.8.0 analysis...")
-        status_880 = client.wait_for_completion(job_id_880, poll_interval=0.5)
-        print(f"    Status: {status_880['status']}")
+        print("  - Waiting for 'next' analysis...")
+        status_next = client.wait_for_completion(job_id_next, poll_interval=0.5)
+        print(f"    Status: {status_next['status']}")
         print()
 
         # Get results for both versions
         for version, job_id, status in [
             ("8.7.0", job_id_870, status_870),
-            ("8.8.0", job_id_880, status_880),
+            ("next", job_id_next, status_next),
         ]:
             print(f"\n{'=' * 80}")
             print(f"Results for Robot Server Version {version}")

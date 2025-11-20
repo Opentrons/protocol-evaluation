@@ -133,8 +133,11 @@ class ProtocolProcessor:
             print(f"Job {job_id} completed successfully")
 
         except Exception as e:
+            import traceback
+
             error_msg = f"Error processing job: {str(e)}"
             print(f"Job {job_id} failed: {error_msg}")
+            print(f"Traceback: {traceback.format_exc()}")
             write_job_status(job_dir, JobStatus.FAILED, error=error_msg)
 
     def _extract_first_json_object(self, text: str) -> dict[str, Any] | None:

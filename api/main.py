@@ -82,7 +82,7 @@ class JobResultResponse(BaseModel):
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_protocol(
     robot_version: str = Form(
-        ..., description="Robot server version (e.g., '8.7.0', '8.8.0')"
+        ..., description="Robot server version (e.g., '8.7.0', 'next')"
     ),
     protocol_file: UploadFile = File(..., description="Python protocol file (.py)"),
     labware_files: list[UploadFile] = File(
@@ -97,7 +97,7 @@ async def analyze_protocol(
     Analyze a protocol file with optional custom labware, CSV data, and runtime parameters.
 
     Args:
-        robot_version: Robot server version (e.g., '8.7.0', '8.8.0')
+        robot_version: Robot server version (e.g., '8.7.0', 'next')
         protocol_file: Required Python protocol file (.py extension)
         labware_files: Optional list of custom labware definition files (.json)
         csv_file: Optional CSV file (.csv or .txt extension)

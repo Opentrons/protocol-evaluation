@@ -11,7 +11,7 @@ class EnvironmentConfig:
     name: str
     python_version: str
     venv_path: Path
-    install_spec: str  # pip install specification
+    install_specs: list[str]  # pip install specifications (run in order)
 
 
 # Map robot server versions to their environment configurations
@@ -20,49 +20,49 @@ ENVIRONMENT_CONFIGS = {
         name="opentrons-8.0.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.0.0"),
-        install_spec="opentrons==8.0.0",
+        install_specs=["opentrons==8.0.0"],
     ),
     "8.2.0": EnvironmentConfig(
         name="opentrons-8.2.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.2.0"),
-        install_spec="opentrons==8.2.0",
+        install_specs=["opentrons==8.2.0"],
     ),
     "8.3.0": EnvironmentConfig(
         name="opentrons-8.3.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.3.0"),
-        install_spec="opentrons==8.3.0",
+        install_specs=["opentrons==8.3.0"],
     ),
     "8.4.0": EnvironmentConfig(
         name="opentrons-8.4.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.4.0"),
-        install_spec="opentrons==8.4.0",
+        install_specs=["opentrons==8.4.0"],
     ),
     "8.5.0": EnvironmentConfig(
         name="opentrons-8.5.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.5.0"),
-        install_spec="opentrons==8.5.0",
+        install_specs=["opentrons==8.5.0"],
     ),
     "8.6.0": EnvironmentConfig(
         name="opentrons-8.6.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.6.0"),
-        install_spec="opentrons==8.6.0",
+        install_specs=["opentrons==8.6.0"],
     ),
     "8.7.0": EnvironmentConfig(
         name="opentrons-8.7.0",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-8.7.0"),
-        install_spec="opentrons==8.7.0",
+        install_specs=["opentrons==8.7.0"],
     ),
-    "8.8.0": EnvironmentConfig(
-        name="opentrons-8.8.0-dev",
+    "next": EnvironmentConfig(
+        name="opentrons-next",
         python_version="3.10",
-        venv_path=Path(".venvs/opentrons-8.8.0"),
-        install_spec="git+https://github.com/Opentrons/opentrons.git@chore_release-8.8.0#subdirectory=api",
+        venv_path=Path(".venvs/opentrons-next"),
+        install_specs=["opentrons==8.8.0a8"],
     ),
 }
 

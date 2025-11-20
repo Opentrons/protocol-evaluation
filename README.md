@@ -15,9 +15,11 @@ FastAPI service for analyzing Opentrons protocols with asynchronous processing.
 This service uses a two-component architecture:
 
 1. **FastAPI Server** (`api/main.py`): Handles file uploads and serves results
-2. **Processor Service** (`api/processor.py`): Processes analysis jobs asynchronously
+2. **Processor Service** (`analyze/processor.py`): Processes analysis jobs asynchronously in the background
 
 Jobs are queued via the filesystem at `storage/jobs/{job_id}/` and the processor picks them up for analysis.
+
+Each job specifies a target robot server version. Supported versions range from 8.0.0 through the special `next` alias, which always points at the latest published Opentrons alpha build (configured in `analyze/env_config.py`). The processor spins up isolated virtual environments (managed via uv) per version so analyses stay reproducible.
 
 ## Development
 
@@ -113,20 +115,24 @@ make test-integration
 
 ### Makefile Targets
 
-- `make setup` - Install dependencies
-- `make teardown` - Remove virtual environment
-- `make test` - Run all tests
-- `make test-unit` - Run unit tests only
-- `make test-integration` - Run integration tests only
-- `make format` - Format code with ruff
-- `make clean-storage` - Delete all job files
-- `make run-api` - Start the FastAPI server
-- `make run-processor` - Start the processor service (daemon mode)
-- `make run-processor-once` - Run processor once and exit
+- `make setup` - Install dependencies with uv (including dev tools)
+- `make teardown` - Remove the project virtual environment
+- `make lint` - Run ruff lint + format check (no fixes)
+- `make format` - Run ruff check --fix and ruff format
+- `make test` - Run unit + integration tests (excludes e2e)
+- `make test-unit` / `make test-integration` - Run specific suites
+- `make test-e2e` - Spin up both services, run E2E tests, capture logs
+- `make test-all` - Run lint, fast tests, and e2e in sequence
+- `make run` - Launch both API and processor in one terminal
+- `make run-api` / `make run-processor` / `make run-processor-once` - Control individual services
+- `make run-client` - Execute the example client workflow
+- `make clean-storage` - Delete all queued job directories
+- `make clean-venvs` - Remove analysis virtual environments (recreated on demand)
+- `make clean-e2e-artifacts` - Remove e2e PID + log files (`e2e-*.pid/.log`)
 
 ## Project Structure
 
-```
+```text
 protocol-analysis/
 ├── api/
 │   ├── __init__.py

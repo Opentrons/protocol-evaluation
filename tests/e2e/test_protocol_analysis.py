@@ -27,17 +27,17 @@ def test_analyze_protocol_e2e():
         assert job_id_870 is not None
         assert len(job_id_870) > 0
 
-        # Submit protocol for analysis with robot version 8.8.0
-        job_id_880 = client.submit_protocol(protocol_file, robot_version="8.8.0")
-        assert job_id_880 is not None
-        assert len(job_id_880) > 0
+        # Submit protocol for analysis with the 'next' robot version
+        job_id_next = client.submit_protocol(protocol_file, robot_version="next")
+        assert job_id_next is not None
+        assert len(job_id_next) > 0
 
         # Poll for completion of both jobs
         status_870 = client.wait_for_completion(job_id_870, poll_interval=0.5)
         assert status_870["status"] == "completed"
 
-        status_880 = client.wait_for_completion(job_id_880, poll_interval=0.5)
-        assert status_880["status"] == "completed"
+        status_next = client.wait_for_completion(job_id_next, poll_interval=0.5)
+        assert status_next["status"] == "completed"
 
         # Get and verify results for 8.7.0
         result_870 = client.get_job_result(job_id_870)
@@ -47,13 +47,13 @@ def test_analyze_protocol_e2e():
         assert result_870["analysis"]["robot_version"] == "8.7.0"
         assert result_870["analysis"]["analysis"]["result"] == "ok"
 
-        # Get and verify results for 8.8.0
-        result_880 = client.get_job_result(job_id_880)
-        assert result_880["status"] == "completed"
-        assert result_880["analysis"] is not None
-        assert result_880["analysis"]["status"] == "success"
-        assert result_880["analysis"]["robot_version"] == "8.8.0"
-        assert result_880["analysis"]["analysis"]["result"] == "ok"
+        # Get and verify results for 'next'
+        result_next = client.get_job_result(job_id_next)
+        assert result_next["status"] == "completed"
+        assert result_next["analysis"] is not None
+        assert result_next["analysis"]["status"] == "success"
+        assert result_next["analysis"]["robot_version"] == "next"
+        assert result_next["analysis"]["analysis"]["result"] == "ok"
 
 
 if __name__ == "__main__":
