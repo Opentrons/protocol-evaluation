@@ -62,7 +62,7 @@ ENVIRONMENT_CONFIGS = {
         name="opentrons-next",
         python_version="3.10",
         venv_path=Path(".venvs/opentrons-next"),
-        install_specs=["opentrons==8.8.0a8"],
+        install_specs=["opentrons==8.8.0a9"],
     ),
 }
 

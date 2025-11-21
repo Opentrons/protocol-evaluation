@@ -91,7 +91,7 @@ async def evaluate_protocol(
     ),
     csv_file: UploadFile | None = File(
         default=None,
-        description="Optional CSV file (.csv or .txt) used for add_csv_file runtime parameters",
+        description="Optional CSV file (.csv or .txt) used for add_csv_file runtime parameter",
     ),
     rtp: str | None = Form(default=None, description="Optional RTP JSON object"),
 ) -> EvaluateResponse:
