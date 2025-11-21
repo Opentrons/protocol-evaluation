@@ -1,13 +1,13 @@
-# protocol-analysis
+# protocol-evaluation
 
 FastAPI service for analyzing Opentrons protocols with asynchronous processing.
 
 ## Features
 
 - **`/info` endpoint**: Returns application version and protocol API to robot stack version mappings
-- **`/analyze` endpoint**: Accepts protocol files for analysis with optional custom labware, CSV data, and runtime parameters
-- **`/jobs/{job_id}/status` endpoint**: Check the status of an analysis job
-- **`/jobs/{job_id}/result` endpoint**: Retrieve completed analysis results
+- **`/evaluate` endpoint**: Accepts protocol files for evaluation with optional custom labware, CSV data, and runtime parameters
+- **`/jobs/{job_id}/status` endpoint**: Check the status of an evaluation job
+- **`/jobs/{job_id}/result` endpoint**: Retrieve completed analysis or simulation results
 - **Asynchronous processing**: Protocol analysis runs in a separate processor service
 
 ## Architecture
@@ -15,11 +15,11 @@ FastAPI service for analyzing Opentrons protocols with asynchronous processing.
 This service uses a two-component architecture:
 
 1. **FastAPI Server** (`api/main.py`): Handles file uploads and serves results
-2. **Processor Service** (`analyze/processor.py`): Processes analysis jobs asynchronously in the background
+2. **Processor Service** (`evaluate/processor.py`): Processes evaluation jobs asynchronously in the background
 
 Jobs are queued via the filesystem at `storage/jobs/{job_id}/` and the processor picks them up for analysis.
 
-Each job specifies a target robot server version. Supported versions range from 8.0.0 through the special `next` alias, which always points at the latest published Opentrons alpha build (configured in `analyze/env_config.py`). The processor spins up isolated virtual environments (managed via uv) per version so analyses stay reproducible.
+Each job specifies a target robot server version. Supported versions range from 8.0.0 through the special `next` alias, which always points at the latest published Opentrons alpha build (configured in `evaluate/env_config.py`). The processor spins up isolated virtual environments (managed via uv) per version so analyses stay reproducible.
 
 ## Development
 
@@ -182,9 +182,9 @@ Returns application information including version and protocol API version mappi
 }
 ```
 
-### POST `/analyze`
+### POST `/evaluate`
 
-Accepts a protocol file for analysis with optional custom labware, CSV data, and runtime parameters.
+Accepts a protocol file for evaluation with optional custom labware, CSV data, and runtime parameters.
 
 **Parameters:**
 
@@ -196,7 +196,7 @@ Accepts a protocol file for analysis with optional custom labware, CSV data, and
 **Example using curl:**
 
 ```bash
-curl -X POST http://localhost:8000/analyze \
+curl -X POST http://localhost:8000/evaluate \
   -F "protocol_file=@my_protocol.py" \
   -F "labware_files=@custom_labware1.json" \
   -F "labware_files=@custom_labware2.json" \
@@ -219,19 +219,22 @@ curl -X POST http://localhost:8000/analyze \
 }
 ```
 
-The `job_id` is a unique identifier for this analysis job. Files are saved to `storage/jobs/{job_id}/` with the following structure:
+The `job_id` is a unique identifier for this evaluation job. Files are saved to `storage/jobs/{job_id}/` with the following structure:
 
 - `{job_id}.py` - The protocol file
 - `labware/` - Directory containing custom labware JSON files
 - `{original_name}.csv` - The CSV file (if provided)
 - `status.json` - Job status information
 - `completed_analysis.json` - Analysis results (created by processor when complete)
+- `completed_simulation.json` - Output from `opentrons.simulate` (or skip reason if unsupported)
 
 The RTP parameters are stored with the response but not persisted to disk.
 
+Simulation is best-effort: if runtime parameter overrides or RTP CSV inputs are provided, the processor skips `simulate` and records the reason in `completed_simulation.json`.
+
 ### GET `/jobs/{job_id}/status`
 
-Check the status of an analysis job.
+Check the status of an evaluation job.
 
 **Response:**
 
@@ -247,7 +250,7 @@ Status values: `pending`, `processing`, `completed`, `failed`
 
 ### GET `/jobs/{job_id}/result`
 
-Retrieve the analysis results for a completed job.
+Retrieve either the analysis or simulation results for a completed job. Use the optional `result_type` query parameter (`analysis` by default, or `simulation`).
 
 **Response:**
 
@@ -255,7 +258,8 @@ Retrieve the analysis results for a completed job.
 {
   "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
   "status": "completed",
-  "analysis": {
+  "result_type": "analysis",
+  "result": {
     "job_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
     "status": "success",
     "files_analyzed": {
@@ -277,14 +281,16 @@ Retrieve the analysis results for a completed job.
     }
   }
 }
+
+To retrieve the simulation output instead, append `?result_type=simulation` to the request URL.
 ```
 
 ## Job Processing Flow
 
-1. **Submit**: Client POSTs to `/analyze` with protocol files
+1. **Submit**: Client POSTs to `/evaluate` with protocol files
 2. **Queue**: API saves files to `storage/jobs/{job_id}/` and marks status as `pending`
 3. **Process**: Processor service picks up pending jobs and analyzes them
-4. **Complete**: Processor writes `completed_analysis.json` and updates status to `completed`
+4. **Complete**: Processor writes `completed_analysis.json`, `completed_simulation.json`, and updates status to `completed`
 5. **Retrieve**: Client GETs `/jobs/{job_id}/result` to retrieve analysis
 
 The processor service can run:
@@ -313,7 +319,7 @@ make run-processor
 ### 2. Submit a Protocol for Analysis
 
 ```bash
-curl -X POST http://localhost:8000/analyze \
+curl -X POST http://localhost:8000/evaluate \
   -F "protocol_file=@example_protocol.py" \
   | jq '.'
 ```

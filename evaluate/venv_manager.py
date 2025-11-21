@@ -5,7 +5,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from analyze.env_config import EnvironmentConfig
+from evaluate.env_config import EnvironmentConfig
 
 
 class VenvManager:

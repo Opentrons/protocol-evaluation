@@ -1,4 +1,4 @@
-"""Client for uploading protocols and retrieving analysis results."""
+"""Client for uploading protocols and retrieving evaluation results."""
 
 import asyncio
 import json
@@ -10,8 +10,8 @@ from typing import Any
 import httpx
 
 
-class AnalysisClient:
-    """Client for interacting with the protocol analysis API."""
+class EvaluationClient:
+    """Client for interacting with the protocol evaluation API."""
 
     def __init__(self, base_url: str = "http://127.0.0.1:8000"):
         """Initialize the client with the base API URL."""
@@ -33,7 +33,7 @@ class AnalysisClient:
         rtp: dict[str, Any] | None = None,
     ) -> str:
         """
-        Submit a protocol for analysis.
+        Submit a protocol for evaluation.
 
         Args:
             protocol_file: Path to the protocol file
@@ -43,7 +43,7 @@ class AnalysisClient:
             rtp: Optional runtime parameter object to send as JSON
 
         Returns:
-            Job ID for tracking the analysis
+            Job ID for tracking the evaluation
         """
         with ExitStack() as stack:
             protocol_handle = stack.enter_context(open(protocol_file, "rb"))
@@ -89,7 +89,7 @@ class AnalysisClient:
                 data["rtp"] = json.dumps(rtp)
 
             response = self.client.post(
-                f"{self.base_url}/analyze",
+                f"{self.base_url}/evaluate",
                 files=files,
                 data=data,
             )
@@ -103,9 +103,14 @@ class AnalysisClient:
         response.raise_for_status()
         return response.json()
 
-    def get_job_result(self, job_id: str) -> dict[str, Any]:
-        """Get the result of a completed job."""
-        response = self.client.get(f"{self.base_url}/jobs/{job_id}/result")
+    def get_job_result(
+        self, job_id: str, result_type: str = "analysis"
+    ) -> dict[str, Any]:
+        """Get either the analysis or simulation result for a completed job."""
+        response = self.client.get(
+            f"{self.base_url}/jobs/{job_id}/result",
+            params={"result_type": result_type},
+        )
         response.raise_for_status()
         return response.json()
 
@@ -154,8 +159,8 @@ class AnalysisClient:
         self.close()
 
 
-class AsyncAnalysisClient:
-    """Async client for interacting with the protocol analysis API."""
+class AsyncEvaluationClient:
+    """Async client for interacting with the protocol evaluation API."""
 
     def __init__(self, base_url: str = "http://127.0.0.1:8000"):
         """Initialize the async client with the base API URL."""
@@ -176,7 +181,7 @@ class AsyncAnalysisClient:
         csv_file: Path | None = None,
         rtp: dict[str, Any] | None = None,
     ) -> str:
-        """Submit a protocol for analysis."""
+        """Submit a protocol for evaluation."""
 
         with ExitStack() as stack:
             protocol_handle = stack.enter_context(open(protocol_file, "rb"))
@@ -222,7 +227,7 @@ class AsyncAnalysisClient:
                 data["rtp"] = json.dumps(rtp)
 
             response = await self.client.post(
-                f"{self.base_url}/analyze",
+                f"{self.base_url}/evaluate",
                 files=files,
                 data=data,
             )
@@ -236,9 +241,14 @@ class AsyncAnalysisClient:
         response.raise_for_status()
         return response.json()
 
-    async def get_job_result(self, job_id: str) -> dict[str, Any]:
-        """Get the result of a completed job."""
-        response = await self.client.get(f"{self.base_url}/jobs/{job_id}/result")
+    async def get_job_result(
+        self, job_id: str, result_type: str = "analysis"
+    ) -> dict[str, Any]:
+        """Get either the analysis or simulation result for a completed job."""
+        response = await self.client.get(
+            f"{self.base_url}/jobs/{job_id}/result",
+            params={"result_type": result_type},
+        )
         response.raise_for_status()
         return response.json()
 
