@@ -1,1 +1,1 @@
-"""End-to-end tests for the protocol analysis service."""
+"""End-to-end tests for the protocol evaluate service."""

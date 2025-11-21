@@ -1,18 +1,18 @@
-"""End-to-end test for protocol analysis workflow."""
+"""End-to-end test for protocol evaluation workflow."""
 
 import asyncio
 from pathlib import Path
 
 import pytest
 
-from client.analyze_client import AsyncAnalysisClient
+from client.evaluate_client import AsyncEvaluationClient
 
 POLL_INTERVAL = 0.2
 
 
 @pytest.mark.asyncio
-async def test_analyze_protocol_e2e():
-    """Test the complete workflow of submitting and analyzing a protocol."""
+async def test_evaluate_protocol_e2e():
+    """Test the complete workflow of submitting and evaluating a protocol."""
     # Path to the baseline test protocol
     protocol_file = Path("test-files/simple/Flex_S_v2_24_P50_PAPI_Changes.py")
     custom_protocol_file = Path(
@@ -52,7 +52,7 @@ async def test_analyze_protocol_e2e():
     )
     assert custom_csv_data_file.exists(), f"CSV file not found: {custom_csv_data_file}"
 
-    async with AsyncAnalysisClient() as client:
+    async with AsyncEvaluationClient() as client:
         # Check API info
         info = await client.get_info()
         assert info["version"] == "0.1.0"
@@ -134,49 +134,90 @@ async def test_analyze_protocol_e2e():
         )
 
         assert result_870["status"] == "completed"
-        assert result_870["analysis"] is not None
-        assert result_870["analysis"]["status"] == "success"
-        assert result_870["analysis"]["robot_version"] == "8.7.0"
-        assert result_870["analysis"]["analysis"]["result"] == "ok"
+        assert result_870["result_type"] == "analysis"
+        assert result_870["result"] is not None
+        assert result_870["result"]["status"] == "success"
+        assert result_870["result"]["robot_version"] == "8.7.0"
+        assert result_870["result"]["analysis"]["result"] == "ok"
 
         # Get and verify results for 'next'
         assert result_next["status"] == "completed"
-        assert result_next["analysis"] is not None
-        assert result_next["analysis"]["status"] == "success"
-        assert result_next["analysis"]["robot_version"] == "next"
-        assert result_next["analysis"]["analysis"]["result"] == "ok"
+        assert result_next["result_type"] == "analysis"
+        assert result_next["result"] is not None
+        assert result_next["result"]["status"] == "success"
+        assert result_next["result"]["robot_version"] == "next"
+        assert result_next["result"]["analysis"]["result"] == "ok"
 
         # Get and verify results for protocol with custom labware
         assert result_custom["status"] == "completed"
-        assert result_custom["analysis"] is not None
-        assert result_custom["analysis"]["status"] == "success"
-        assert result_custom["analysis"]["robot_version"] == "8.7.0"
-        assert result_custom["analysis"]["analysis"]["result"] == "ok"
+        assert result_custom["result_type"] == "analysis"
+        assert result_custom["result"] is not None
+        assert result_custom["result"]["status"] == "success"
+        assert result_custom["result"]["robot_version"] == "8.7.0"
+        assert result_custom["result"]["analysis"]["result"] == "ok"
 
-        analyzed_labware = result_custom["analysis"]["files_analyzed"]["labware_files"]
+        analyzed_labware = result_custom["result"]["files_analyzed"]["labware_files"]
         assert analyzed_labware is not None, "Expected labware files in analysis output"
         expected_labware_names = {path.name for path in custom_labware_files}
         assert set(analyzed_labware) >= expected_labware_names
 
         # Get and verify results for protocol with CSV input
         assert result_csv["status"] == "completed"
-        assert result_csv["analysis"] is not None
-        assert result_csv["analysis"]["status"] == "success"
-        assert result_csv["analysis"]["robot_version"] == "8.7.0"
-        assert result_csv["analysis"]["analysis"]["result"] == "ok"
-        analyzed_csv = result_csv["analysis"]["files_analyzed"]["csv_file"]
+        assert result_csv["result_type"] == "analysis"
+        assert result_csv["result"] is not None
+        assert result_csv["result"]["status"] == "success"
+        assert result_csv["result"]["robot_version"] == "8.7.0"
+        assert result_csv["result"]["analysis"]["result"] == "ok"
+        analyzed_csv = result_csv["result"]["files_analyzed"]["csv_file"]
         assert analyzed_csv, "Expected csv file in analysis output"
         assert analyzed_csv == csv_data_file.name
 
         # Get and verify results for protocol requiring both labware and CSV
         assert result_custom_csv["status"] == "completed"
-        assert result_custom_csv["analysis"] is not None
-        assert result_custom_csv["analysis"]["status"] == "success"
-        assert result_custom_csv["analysis"]["robot_version"] == "8.7.0"
-        assert result_custom_csv["analysis"]["analysis"]["result"] == "ok"
-        analyzed_custom_csv = result_custom_csv["analysis"]["files_analyzed"]
+        assert result_custom_csv["result_type"] == "analysis"
+        assert result_custom_csv["result"] is not None
+        assert result_custom_csv["result"]["status"] == "success"
+        assert result_custom_csv["result"]["robot_version"] == "8.7.0"
+        assert result_custom_csv["result"]["analysis"]["result"] == "ok"
+        analyzed_custom_csv = result_custom_csv["result"]["files_analyzed"]
         assert analyzed_custom_csv["csv_file"] == custom_csv_data_file.name
         assert custom_csv_labware_file.name in analyzed_custom_csv["labware_files"]
+
+        # Fetch simulation outputs for every job
+        (
+            sim_870,
+            sim_next,
+            sim_custom,
+            sim_csv,
+            sim_custom_csv,
+        ) = await asyncio.gather(
+            client.get_job_result(job_id_870, result_type="simulation"),
+            client.get_job_result(job_id_next, result_type="simulation"),
+            client.get_job_result(job_id_custom, result_type="simulation"),
+            client.get_job_result(job_id_csv, result_type="simulation"),
+            client.get_job_result(job_id_custom_csv, result_type="simulation"),
+        )
+
+        # Jobs without CSV inputs should have full simulation data
+        for sim_result, version in (
+            (sim_870, "8.7.0"),
+            (sim_next, "next"),
+            (sim_custom, "8.7.0"),
+        ):
+            assert sim_result["status"] == "completed"
+            assert sim_result["result_type"] == "simulation"
+            assert sim_result["result"] is not None
+            assert sim_result["result"]["status"] == "success"
+            assert sim_result["result"]["robot_version"] == version
+            assert "simulation" in sim_result["result"]
+
+        # Jobs with CSV inputs should skip simulation with an explanatory reason
+        for sim_result in (sim_csv, sim_custom_csv):
+            assert sim_result["status"] == "completed"
+            assert sim_result["result_type"] == "simulation"
+            assert sim_result["result"] is not None
+            assert sim_result["result"]["status"] == "skipped"
+            assert "runtime parameter CSV input" in sim_result["result"]["reason"]
 
 
 if __name__ == "__main__":

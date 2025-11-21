@@ -1,4 +1,4 @@
-"""Unit tests for the /analyze endpoint validation logic."""
+"""Unit tests for the /evaluate endpoint validation logic."""
 
 from io import BytesIO
 from unittest.mock import AsyncMock, patch
@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from fastapi import HTTPException, UploadFile
 
-from api.main import analyze_protocol
+from api.main import evaluate_protocol
 
 
 def create_upload_file(filename: str, content: bytes = b"test content") -> UploadFile:
@@ -18,17 +18,17 @@ def create_upload_file(filename: str, content: bytes = b"test content") -> Uploa
 @patch("api.main.file_storage")
 @patch("api.main.write_job_metadata")
 @patch("api.main.write_job_status")
-async def test_analyze_protocol_with_valid_protocol_file(
+async def test_evaluate_protocol_with_valid_protocol_file(
     mock_write_status, mock_write_metadata, mock_storage
 ):
-    """Test that analyze_protocol accepts a valid .py file."""
+    """Test that evaluate_protocol accepts a valid .py file."""
     mock_storage.create_job_directory.return_value = "test-job-id"
     mock_storage.save_protocol_file = AsyncMock()
     mock_storage.base_dir.return_value = "/tmp"
 
     protocol_file = create_upload_file("protocol.py")
 
-    response = await analyze_protocol(
+    response = await evaluate_protocol(
         robot_version="8.7.0",
         protocol_file=protocol_file,
         labware_files=[],
@@ -45,12 +45,12 @@ async def test_analyze_protocol_with_valid_protocol_file(
 
 
 @pytest.mark.asyncio
-async def test_analyze_protocol_rejects_non_py_protocol_file():
-    """Test that analyze_protocol rejects protocol files without .py extension."""
+async def test_evaluate_protocol_rejects_non_py_protocol_file():
+    """Test that evaluate_protocol rejects protocol files without .py extension."""
     protocol_file = create_upload_file("protocol.txt")
 
     with pytest.raises(HTTPException) as exc_info:
-        await analyze_protocol(
+        await evaluate_protocol(
             robot_version="8.7.0",
             protocol_file=protocol_file,
             labware_files=[],
@@ -63,12 +63,12 @@ async def test_analyze_protocol_rejects_non_py_protocol_file():
 
 
 @pytest.mark.asyncio
-async def test_analyze_protocol_rejects_unsupported_version():
-    """Test that analyze_protocol rejects unsupported robot server versions."""
+async def test_evaluate_protocol_rejects_unsupported_version():
+    """Test that evaluate_protocol rejects unsupported robot server versions."""
     protocol_file = create_upload_file("protocol.py")
 
     with pytest.raises(HTTPException) as exc_info:
-        await analyze_protocol(
+        await evaluate_protocol(
             robot_version="99.99.99",
             protocol_file=protocol_file,
             labware_files=[],

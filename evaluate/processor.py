@@ -12,17 +12,18 @@ import ast
 from pathlib import Path
 from typing import Any
 
-from analyze.env_config import get_environment_for_version
-from analyze.job_status import (
+from evaluate.env_config import get_environment_for_version
+from evaluate.job_status import (
     JobStatus,
     read_job_metadata,
     read_job_status,
     write_job_status,
 )
-from analyze.venv_manager import VenvManager
+from evaluate.venv_manager import VenvManager
 from api.config import STORAGE_BASE_DIR
 
 ANALYSIS_TIMEOUT = 120  # Timeout per protocol in seconds
+SIMULATION_TIMEOUT = ANALYSIS_TIMEOUT
 
 
 class ProtocolProcessor:
@@ -127,6 +128,26 @@ class ProtocolProcessor:
             # Write completed analysis
             completed_file = job_dir / "completed_analysis.json"
             completed_file.write_text(json.dumps(analysis_result, indent=2))
+
+            # Run the simulation in the same environment (best-effort)
+            try:
+                simulation_result = self._run_simulation(
+                    python_path, files, robot_version, metadata
+                )
+            except Exception as sim_error:  # pragma: no cover - defensive catch
+                import traceback
+
+                print(f"Job {job_id} simulation failed: {sim_error}")
+                print(f"Traceback: {traceback.format_exc()}")
+                simulation_result = {
+                    "job_id": job_id,
+                    "status": "error",
+                    "error": f"Simulation failed with unexpected error: {sim_error}",
+                    "robot_version": robot_version,
+                }
+
+            simulation_file = job_dir / "completed_simulation.json"
+            simulation_file.write_text(json.dumps(simulation_result, indent=2))
 
             # Update status to completed
             write_job_status(job_dir, JobStatus.COMPLETED)
@@ -415,6 +436,180 @@ sys.exit(exit_code)
         visitor.visit(tree)
         parameter_names.extend(visitor.names)
         return parameter_names
+
+    def _get_simulation_skip_reason(
+        self, metadata: dict[str, Any] | None, files: dict[str, Any]
+    ) -> str | None:
+        """Determine if simulation should be skipped due to unsupported inputs."""
+
+        reasons: list[str] = []
+
+        if metadata:
+            rtp_data = metadata.get("rtp")
+            if isinstance(rtp_data, dict) and rtp_data:
+                reasons.append("runtime parameter overrides are present")
+
+        if files.get("csv_file"):
+            reasons.append("runtime parameter CSV input is provided")
+
+        if not reasons:
+            return None
+
+        joined = " and ".join(reasons)
+        return f"Simulation skipped because {joined}."
+
+    def _get_labware_search_paths(self, files: dict[str, Any]) -> list[str]:
+        """Return directories that should be searched for custom labware."""
+
+        job_dir = files.get("job_dir")
+        if not job_dir:
+            return []
+
+        labware_dir = Path(job_dir) / "labware"
+        if labware_dir.exists():
+            return [str(labware_dir)]
+        return []
+
+    def _run_simulation(
+        self,
+        python_path: Path,
+        files: dict[str, Any],
+        robot_version: str,
+        metadata: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        """Run protocol simulation when supported and capture output."""
+
+        protocol_file = files.get("protocol_file")
+        if not protocol_file:
+            return {
+                "job_id": files.get("job_id"),
+                "status": "error",
+                "error": "No protocol file found",
+                "robot_version": robot_version,
+            }
+
+        skip_reason = self._get_simulation_skip_reason(metadata, files)
+        if skip_reason:
+            return {
+                "job_id": files.get("job_id"),
+                "status": "skipped",
+                "reason": skip_reason,
+                "robot_version": robot_version,
+                "files_analyzed": {
+                    "protocol_file": Path(protocol_file).name,
+                    "labware_files": [
+                        Path(f).name for f in files.get("labware_files", [])
+                    ],
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
+                },
+            }
+
+        labware_dirs = self._get_labware_search_paths(files)
+        labware_arg = ",".join(labware_dirs)
+
+        cmd = [
+            str(python_path),
+            "-c",
+            """
+import json
+import sys
+from pathlib import Path
+from opentrons.simulate import simulate, format_runlog
+
+protocol_file = Path(sys.argv[1])
+labware_dirs = [p for p in sys.argv[2].split(',') if p]
+
+with protocol_file.open() as proto_handle:
+    runlog, _bundle = simulate(
+        proto_handle,
+        custom_labware_paths=labware_dirs,
+    )
+
+formatted_runlog = format_runlog(runlog)
+print(json.dumps({
+    'formatted_runlog': formatted_runlog,
+    'command_count': len(runlog),
+}))
+""",
+            protocol_file,
+            labware_arg,
+        ]
+
+        try:
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=SIMULATION_TIMEOUT,
+            )
+
+            stdout = proc.stdout
+            stderr = proc.stderr
+
+            simulation_json = None
+            try:
+                simulation_json = json.loads(stdout)
+            except Exception:
+                simulation_json = self._extract_first_json_object(stdout)
+                if simulation_json is None:
+                    simulation_json = {
+                        "error": "Failed to decode simulation JSON output",
+                        "raw": stdout,
+                        "stderr": stderr,
+                    }
+
+            return {
+                "job_id": files.get("job_id"),
+                "status": "success" if proc.returncode == 0 else "error",
+                "robot_version": robot_version,
+                "files_analyzed": {
+                    "protocol_file": Path(protocol_file).name,
+                    "labware_files": [
+                        Path(f).name for f in files.get("labware_files", [])
+                    ],
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
+                },
+                "simulation": simulation_json,
+                "logs": stderr,
+                "metadata": {
+                    "robot_version": robot_version,
+                    "processed_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                    "python_path": str(python_path),
+                    "exit_code": proc.returncode,
+                    "labware_search_paths": labware_dirs,
+                },
+            }
+
+        except subprocess.TimeoutExpired:
+            return {
+                "job_id": files.get("job_id"),
+                "status": "error",
+                "error": f"Simulation timed out after {SIMULATION_TIMEOUT} seconds",
+                "robot_version": robot_version,
+                "files_analyzed": {
+                    "protocol_file": Path(protocol_file).name,
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
+                },
+            }
+        except Exception as e:
+            return {
+                "job_id": files.get("job_id"),
+                "status": "error",
+                "error": f"Simulation failed with error: {str(e)}",
+                "robot_version": robot_version,
+                "files_analyzed": {
+                    "protocol_file": Path(protocol_file).name,
+                    "csv_file": Path(files["csv_file"]).name
+                    if files.get("csv_file")
+                    else None,
+                },
+            }
 
     def run_once(self) -> int:
         """Process all pending jobs once.

@@ -1,4 +1,4 @@
-"""Integration tests for the /analyze endpoint."""
+"""Integration tests for the /evaluate endpoint."""
 
 import json
 from io import BytesIO
@@ -15,13 +15,13 @@ def client():
     return TestClient(app)
 
 
-def test_analyze_endpoint_with_minimal_request(client):
-    """Test /analyze endpoint with only required protocol file."""
+def test_evaluate_endpoint_with_minimal_request(client):
+    """Test /evaluate endpoint with only required protocol file."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test protocol"), "text/plain"),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 200
     data = response.json()
@@ -41,8 +41,8 @@ def test_analyze_endpoint_with_minimal_request(client):
     assert (job_dir / "protocol.py").exists()
 
 
-def test_analyze_endpoint_with_all_parameters(client):
-    """Test /analyze endpoint with all parameters provided."""
+def test_evaluate_endpoint_with_all_parameters(client):
+    """Test /evaluate endpoint with all parameters provided."""
     files = [
         ("protocol_file", ("protocol.py", BytesIO(b"# test protocol"), "text/plain")),
         (
@@ -60,7 +60,7 @@ def test_analyze_endpoint_with_all_parameters(client):
     }
 
     response = client.post(
-        "/analyze", files=files, data={**data, "robot_version": "8.7.0"}
+        "/evaluate", files=files, data={**data, "robot_version": "8.7.0"}
     )
 
     assert response.status_code == 200
@@ -82,60 +82,60 @@ def test_analyze_endpoint_with_all_parameters(client):
     assert (job_dir / "data.csv").exists()
 
 
-def test_analyze_endpoint_rejects_invalid_protocol_extension(client):
-    """Test that /analyze rejects protocol files without .py extension."""
+def test_evaluate_endpoint_rejects_invalid_protocol_extension(client):
+    """Test that /evaluate rejects protocol files without .py extension."""
     files = {
         "protocol_file": ("protocol.txt", BytesIO(b"# test"), "text/plain"),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 400
     assert "must have a .py extension" in response.json()["detail"]
 
 
-def test_analyze_endpoint_rejects_invalid_labware_extension(client):
-    """Test that /analyze rejects labware files without .json extension."""
+def test_evaluate_endpoint_rejects_invalid_labware_extension(client):
+    """Test that /evaluate rejects labware files without .json extension."""
     files = [
         ("protocol_file", ("protocol.py", BytesIO(b"# test"), "text/plain")),
         ("labware_files", ("labware.txt", BytesIO(b"invalid"), "text/plain")),
     ]
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 400
     assert "must have a .json extension" in response.json()["detail"]
 
 
-def test_analyze_endpoint_rejects_invalid_csv_extension(client):
-    """Test that /analyze rejects CSV files with invalid extensions."""
+def test_evaluate_endpoint_rejects_invalid_csv_extension(client):
+    """Test that /evaluate rejects CSV files with invalid extensions."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
         "csv_file": ("data.json", BytesIO(b"data"), "application/json"),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 400
     assert "must have a .csv or .txt extension" in response.json()["detail"]
 
 
-def test_analyze_endpoint_accepts_txt_as_csv(client):
-    """Test that /analyze accepts .txt files as CSV."""
+def test_evaluate_endpoint_accepts_txt_as_csv(client):
+    """Test that /evaluate accepts .txt files as CSV."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
         "csv_file": ("data.txt", BytesIO(b"col1,col2\n1,2"), "text/plain"),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 200
     data = response.json()
     assert data["csv_file"] == "data.txt"
 
 
-def test_analyze_endpoint_with_rtp_object(client):
-    """Test /analyze endpoint with RTP parameter."""
+def test_evaluate_endpoint_with_rtp_object(client):
+    """Test /evaluate endpoint with RTP parameter."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
     }
@@ -150,7 +150,7 @@ def test_analyze_endpoint_with_rtp_object(client):
     }
 
     response = client.post(
-        "/analyze", files=files, data={**data, "robot_version": "8.7.0"}
+        "/evaluate", files=files, data={**data, "robot_version": "8.7.0"}
     )
 
     assert response.status_code == 200
@@ -162,8 +162,8 @@ def test_analyze_endpoint_with_rtp_object(client):
     }
 
 
-def test_analyze_endpoint_rejects_invalid_rtp_json(client):
-    """Test that /analyze rejects invalid RTP JSON."""
+def test_evaluate_endpoint_rejects_invalid_rtp_json(client):
+    """Test that /evaluate rejects invalid RTP JSON."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
     }
@@ -172,15 +172,15 @@ def test_analyze_endpoint_rejects_invalid_rtp_json(client):
     }
 
     response = client.post(
-        "/analyze", files=files, data={**data, "robot_version": "8.7.0"}
+        "/evaluate", files=files, data={**data, "robot_version": "8.7.0"}
     )
 
     assert response.status_code == 400
     assert "Invalid RTP JSON" in response.json()["detail"]
 
 
-def test_analyze_endpoint_with_multiple_labware_files(client):
-    """Test /analyze endpoint with multiple labware files."""
+def test_evaluate_endpoint_with_multiple_labware_files(client):
+    """Test /evaluate endpoint with multiple labware files."""
     files = [
         ("protocol_file", ("protocol.py", BytesIO(b"# test"), "text/plain")),
         (
@@ -197,7 +197,7 @@ def test_analyze_endpoint_with_multiple_labware_files(client):
         ),
     ]
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 200
     data = response.json()
@@ -207,8 +207,8 @@ def test_analyze_endpoint_with_multiple_labware_files(client):
     assert "custom3.json" in data["labware_files"]
 
 
-def test_analyze_endpoint_without_optional_files(client):
-    """Test /analyze endpoint without any optional files."""
+def test_evaluate_endpoint_without_optional_files(client):
+    """Test /evaluate endpoint without any optional files."""
     files = {
         "protocol_file": (
             "my_protocol.py",
@@ -217,7 +217,7 @@ def test_analyze_endpoint_without_optional_files(client):
         ),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 200
     data = response.json()
@@ -227,27 +227,27 @@ def test_analyze_endpoint_without_optional_files(client):
     assert data["rtp"] is None
 
 
-def test_analyze_endpoint_returns_json(client):
-    """Test that /analyze endpoint returns JSON content."""
+def test_evaluate_endpoint_returns_json(client):
+    """Test that /evaluate endpoint returns JSON content."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
     }
 
-    response = client.post("/analyze", files=files, data={"robot_version": "8.7.0"})
+    response = client.post("/evaluate", files=files, data={"robot_version": "8.7.0"})
 
     assert response.status_code == 200
     assert response.headers["content-type"] == "application/json"
 
 
-def test_analyze_endpoint_requires_protocol_file(client):
-    """Test that /analyze endpoint requires protocol_file."""
-    response = client.post("/analyze", data={"robot_version": "8.7.0"})
+def test_evaluate_endpoint_requires_protocol_file(client):
+    """Test that /evaluate endpoint requires protocol_file."""
+    response = client.post("/evaluate", data={"robot_version": "8.7.0"})
 
     assert response.status_code == 422  # Unprocessable Entity
 
 
-def test_analyze_endpoint_with_complex_rtp(client):
-    """Test /analyze endpoint with nested RTP structure."""
+def test_evaluate_endpoint_with_complex_rtp(client):
+    """Test /evaluate endpoint with nested RTP structure."""
     files = {
         "protocol_file": ("protocol.py", BytesIO(b"# test"), "text/plain"),
     }
@@ -264,7 +264,7 @@ def test_analyze_endpoint_with_complex_rtp(client):
     }
 
     response = client.post(
-        "/analyze", files=files, data={**data, "robot_version": "8.7.0"}
+        "/evaluate", files=files, data={**data, "robot_version": "8.7.0"}
     )
 
     assert response.status_code == 200
@@ -272,13 +272,13 @@ def test_analyze_endpoint_with_complex_rtp(client):
     assert result["rtp"] == rtp_data
 
 
-def test_analyze_endpoint_only_accepts_post(client):
-    """Test that /analyze endpoint only accepts POST requests."""
-    response = client.get("/analyze")
+def test_evaluate_endpoint_only_accepts_post(client):
+    """Test that /evaluate endpoint only accepts POST requests."""
+    response = client.get("/evaluate")
     assert response.status_code == 405  # Method Not Allowed
 
-    response = client.put("/analyze")
+    response = client.put("/evaluate")
     assert response.status_code == 405
 
-    response = client.delete("/analyze")
+    response = client.delete("/evaluate")
     assert response.status_code == 405

@@ -4,7 +4,7 @@
 import argparse
 import sys
 
-from analyze.processor import ProtocolProcessor
+from evaluate.processor import ProtocolProcessor
 
 
 def main() -> int:

@@ -1,11 +1,11 @@
-"""FastAPI application for protocol analysis."""
+"""FastAPI application for protocol evaluation."""
 
-from typing import Any
+from typing import Any, Literal
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 
-from analyze.job_status import (
+from evaluate.job_status import (
     JobStatus,
     read_job_status,
     write_job_metadata,
@@ -18,8 +18,8 @@ from api.version_mapping import PROTOCOL_API_TO_ROBOT_STACK, VALID_ROBOT_VERSION
 VERSION = "0.1.0"
 
 app = FastAPI(
-    title="Protocol Analysis API",
-    description="API for analyzing Opentrons protocols",
+    title="Protocol Evaluation API",
+    description="API for evaluating Opentrons protocols",
     version=VERSION,
 )
 
@@ -50,8 +50,8 @@ async def get_info() -> InfoResponse:
     )
 
 
-class AnalyzeResponse(BaseModel):
-    """Response model for the /analyze endpoint."""
+class EvaluateResponse(BaseModel):
+    """Response model for the /evaluate endpoint."""
 
     job_id: str
     protocol_file: str
@@ -71,16 +71,17 @@ class JobStatusResponse(BaseModel):
 
 
 class JobResultResponse(BaseModel):
-    """Response model for completed job analysis."""
+    """Response model for completed job results."""
 
     job_id: str
     status: str
-    analysis: dict[str, Any] | None = None
+    result_type: Literal["analysis", "simulation"]
+    result: dict[str, Any] | None = None
     error: str | None = None
 
 
-@app.post("/analyze", response_model=AnalyzeResponse)
-async def analyze_protocol(
+@app.post("/evaluate", response_model=EvaluateResponse)
+async def evaluate_protocol(
     robot_version: str = Form(
         ..., description="Robot server version (e.g., '8.7.0', 'next')"
     ),
@@ -93,9 +94,9 @@ async def analyze_protocol(
         description="Optional CSV file (.csv or .txt) used for add_csv_file runtime parameters",
     ),
     rtp: str | None = Form(default=None, description="Optional RTP JSON object"),
-) -> AnalyzeResponse:
+) -> EvaluateResponse:
     """
-    Analyze a protocol file with optional custom labware, CSV data, and runtime parameters.
+    Evaluate a protocol file with optional custom labware, CSV data, and runtime parameters.
 
     Args:
         robot_version: Robot server version (e.g., '8.7.0', 'next')
@@ -105,7 +106,7 @@ async def analyze_protocol(
         rtp: Optional runtime parameters as JSON string
 
     Returns:
-        AnalyzeResponse with details about the uploaded files
+        EvaluateResponse with details about the uploaded files
 
     Raises:
         HTTPException: If file extensions are invalid or version is unsupported
@@ -185,7 +186,7 @@ async def analyze_protocol(
     # Mark job as pending for the processor to pick up
     write_job_status(job_dir, JobStatus.PENDING)
 
-    return AnalyzeResponse(
+    return EvaluateResponse(
         job_id=job_id,
         protocol_file=protocol_file.filename,
         labware_files=labware_filenames,
@@ -235,7 +236,13 @@ async def get_job_status(job_id: str) -> JobStatusResponse:
     summary="Get job result",
     description="Get the analysis result for a completed job",
 )
-async def get_job_result(job_id: str) -> JobResultResponse:
+async def get_job_result(
+    job_id: str,
+    result_type: Literal["analysis", "simulation"] = Query(
+        "analysis",
+        description="Which evaluation artifact to return",
+    ),
+) -> JobResultResponse:
     """
     Get the analysis result for a completed job.
 
@@ -243,7 +250,7 @@ async def get_job_result(job_id: str) -> JobResultResponse:
         job_id: The job ID to retrieve
 
     Returns:
-        JobResultResponse with analysis data if completed
+        JobResultResponse with requested evaluation data if completed
 
     Raises:
         HTTPException: If job is not found or not yet completed
@@ -259,24 +266,34 @@ async def get_job_result(job_id: str) -> JobResultResponse:
     status = status_data.get("status", "pending")
 
     # Check if job has completed
-    completed_file = job_dir / "completed_analysis.json"
-    if not completed_file.exists():
+    artifact_filename = (
+        "completed_analysis.json"
+        if result_type == "analysis"
+        else "completed_simulation.json"
+    )
+    artifact_file = job_dir / artifact_filename
+
+    if not artifact_file.exists():
         if status == JobStatus.FAILED.value:
             return JobResultResponse(
                 job_id=job_id,
                 status=status,
+                result_type=result_type,
                 error=status_data.get("error", "Job failed"),
             )
         raise HTTPException(
             status_code=400,
-            detail=f"Job {job_id} has not completed yet. Current status: {status}",
+            detail=(
+                f"Requested {result_type} results are not available yet for job {job_id}."
+                f" Current status: {status}"
+            ),
         )
 
-    # Read completed analysis
-    analysis_data = json.loads(completed_file.read_text())
+    result_data = json.loads(artifact_file.read_text())
 
     return JobResultResponse(
         job_id=job_id,
         status=status,
-        analysis=analysis_data,
+        result_type=result_type,
+        result=result_data,
     )

@@ -1,11 +1,11 @@
-# Protocol Analysis Service - AI Coding Agent Guide
+# Protocol Evaluation Service - AI Coding Agent Guide
 
 ## Architecture Overview
 
-This is a **two-component asynchronous protocol analysis service** for Opentrons laboratory automation protocols:
+This is a **two-component asynchronous protocol evaluation service** for Opentrons laboratory automation protocols:
 
 1. **FastAPI Server** (`api/main.py`) - Handles file uploads, serves results, manages REST API
-2. **Processor Service** (`analyze/processor.py`) - Asynchronously processes analysis jobs using filesystem-based job queue
+2. **Processor Service** (`evaluate/processor.py`) - Asynchronously processes analysis and simulate jobs using filesystem-based job queue
 
 **Critical Design Pattern**: Jobs communicate via filesystem at `storage/jobs/{job_id}/`. The API writes files/metadata, sets status to `PENDING`, and the processor polls for pending jobs, analyzes them in isolated venvs, and writes results back.
 
@@ -13,8 +13,8 @@ This is a **two-component asynchronous protocol analysis service** for Opentrons
 
 **Key Concept**: This service analyzes protocols against **multiple Opentrons robot server versions** (8.0.0 through `next`) by creating isolated Python virtual environments for each version.
 
-- `analyze/env_config.py` - Maps robot versions to pip install specs (including a `next` alias that follows the latest published alpha build)
-- `analyze/venv_manager.py` - Creates/manages venvs in `.venvs/opentrons-{version}/` using the uv-managed Python interpreter to keep versions consistent
+- `evaluate/env_config.py` - Maps robot versions to pip install specs (including a `next` alias that follows the latest published alpha build)
+- `evaluate/venv_manager.py` - Creates/manages venvs in `.venvs/opentrons-{version}/` using the uv-managed Python interpreter to keep versions consistent
 - `api/version_mapping.py` - Maps Protocol API versions (2.20-2.27) to robot stack versions
 
 **Pattern**: Each analysis job specifies a `robot_version`, which determines which venv to use. The processor creates venvs on-demand and runs `opentrons.cli.analyze` within the correct environment.
@@ -75,7 +75,7 @@ make run              # Starts both with Ctrl+C to stop
 
 ### Job Status State Machine
 
-Jobs follow strict state transitions (`analyze/job_status.py`):
+Jobs follow strict state transitions (`evaluate/job_status.py`):
 
 ```
 PENDING → PROCESSING → COMPLETED (with completed_analysis.json)
@@ -89,7 +89,7 @@ PENDING → PROCESSING → COMPLETED (with completed_analysis.json)
 
 ### Analysis Execution Pattern
 
-**Key Implementation** (`analyze/processor.py._run_analysis()`):
+**Key Implementation** (`evaluate/processor.py._run_analysis()`):
 
 Uses subprocess to run Python code in the target venv that:
 1. Imports `opentrons.cli.analyze._analyze` and `_Output`
@@ -111,10 +111,10 @@ Uses subprocess to run Python code in the target venv that:
 
 ## Client Usage Pattern
 
-**Example** (`run_client.py`, `client/analyze_client.py`):
+**Example** (`run_client.py`, `client/evaluate_client.py`):
 
 ```python
-with AnalysisClient() as client:
+with EvaluationClient() as client:
     job_id = client.submit_protocol(protocol_file, robot_version="8.7.0")
     status = client.wait_for_completion(job_id, poll_interval=0.5)
     result = client.get_job_result(job_id)
@@ -137,7 +137,7 @@ with AnalysisClient() as client:
 ## Adding Support for New Robot Versions
 
 1. Add to `PROTOCOL_API_TO_ROBOT_STACK` in `api/version_mapping.py`
-2. Add to `ENVIRONMENT_CONFIGS` in `analyze/env_config.py` with install spec
+2. Add to `ENVIRONMENT_CONFIGS` in `evaluate/env_config.py` with install spec
 3. Update `README.md` documentation
 4. Test with `make test-all` (especially e2e tests)
 
